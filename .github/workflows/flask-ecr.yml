@@ -1,0 +1,27 @@
+name: Production CICD
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main       
+jobs:
+    test:
+        name: Python Tests
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+            - name: Setup Python
+              uses: actions/setup-python@v6
+              with:
+                python-version: "3.14"
+                cache: pip
+                cache-dependency-path: app/requirements-dev.txt
+            - name: Installing dependency
+              run: python -m pip install -r app/requirements-dev.txt
+            - name: Pytest
+              run: python -m pytest app/tests -v
+              

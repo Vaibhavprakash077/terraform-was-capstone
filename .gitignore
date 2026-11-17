@@ -1,0 +1,44 @@
+# Terraform working directories
+**/.terraform/*
+
+# Terraform state
+*.tfstate
+*.tfstate.*
+
+# Variable files that may contain secrets
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Local override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI configuration
+.terraformrc
+terraform.rc
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Docker / Application secrets
+.env
+.env.*
+!.env.example
+
+# Terraform saved plans
+*.tfplan
+*.tfplan.*
+
+# macOS
+.DS_Store

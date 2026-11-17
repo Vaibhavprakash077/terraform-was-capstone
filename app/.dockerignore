@@ -1,0 +1,6 @@
+# Only send the files the runtime image needs.
+**
+!Dockerfile
+!.dockerignore
+!requirements.txt
+!__init__.py
