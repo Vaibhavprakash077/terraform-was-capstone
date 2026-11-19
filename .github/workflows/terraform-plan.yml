@@ -39,3 +39,5 @@ jobs:
         run: terraform -chdir=environments/dev init -input=false -lockfile=readonly
       - name: Verify Terraform state list
         run: terraform -chdir=environments/dev state list
+      - name: Terraform plan
+        run: terraform -chdir=environments/dev plan
