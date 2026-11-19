@@ -37,3 +37,5 @@ jobs:
 
       - name: Initialize Terraform backend
         run: terraform -chdir=environments/dev init -input=false -lockfile=readonly
+      - name: Verify Terraform state list
+        run: terraform -chdir=environments/dev state list
