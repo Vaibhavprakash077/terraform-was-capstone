@@ -40,4 +40,20 @@ jobs:
       - name: Verify Terraform state list
         run: terraform -chdir=environments/dev state list
       - name: Terraform plan
-        run: terraform -chdir=environments/dev plan
+        shell: bash
+        run: |
+            set +e
+            terraform -chdir=environments/dev plan \
+                -input=false \
+                -no-color \
+                -lock-timeout=5m \
+                -detailed-exitcode \
+                > "$RUNNER_TEMP/terraform-plan.log" 2>&1
+            status=$?
+            set -e
+
+            case "$status" in
+                0) echo "Plan succeeded: no changes." ;;
+                2) echo "Plan succeeded: changes detected." ;;
+                *) echo "::error::Terraform planning failed (exit $status)."; exit "$status" ;;
+            esac
