@@ -1,0 +1,34 @@
+name: Terraform apply
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply-auth-check:
+    name: Verify Terraform Apply Authentication
+    runs-on: ubuntu-latest
+
+    environment: terraform-apply
+
+    permissions:
+      contents: read
+      id-token: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::207224908189:role/GithubActions-Terraform-Apply-Role
+          aws-region: ap-south-1
+          role-session-name: TerraformApplyAuthcheck
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Confirm authentication test
+        run: echo "Terraform Apply OIDC authentication successful"
+        
