@@ -40,21 +40,47 @@ jobs:
         run: terraform -chdir=environments/dev init -input=false -lockfile=readonly
       - name: Verify Terraform state list
         run: terraform -chdir=environments/dev state list
+
       - name: Terraform plan
         shell: bash
         run: |
-            set +e
-            terraform -chdir=environments/dev plan \
-                -input=false \
-                -no-color \
-                -lock-timeout=5m \
-                -detailed-exitcode \
-                > "$RUNNER_TEMP/terraform-plan.log" 2>&1
-            status=$?
-            set -e
+          umask 077
+          plan_file="$RUNNER_TEMP/dev.tfplan"
+          log_file="$RUNNER_TEMP/terraform-plan.log"
+          trap 'rm -f "$plan_file" "$log_file"' EXIT
 
-            case "$status" in
-                0) echo "Plan succeeded: no changes." ;;
-                2) echo "Plan succeeded: changes detected." ;;
-                *) echo "::error::Terraform planning failed (exit $status)."; exit "$status" ;;
-            esac
+          set +e
+          terraform -chdir=environments/dev plan \
+            -input=false \
+            -no-color \
+            -lock-timeout=5m \
+            -detailed-exitcode \
+            -out="$plan_file" \
+            > "$log_file" 2>&1
+          status=$?
+          set -e
+
+          case "$status" in
+            0) echo "Plan succeeded: no changes." ;;
+            2) echo "Plan succeeded: changes detected." ;;
+            *)
+              echo "::error::Terraform planning failed (exit $status)."
+              exit "$status"
+              ;;
+          esac
+
+          {
+            echo "## Terraform Plan — dev"
+            echo ""
+            echo "Commit: \`$GITHUB_SHA\`"
+            echo ""
+            echo "| Action | Terraform resource address |"
+            echo "|---|---|"
+
+            terraform -chdir=environments/dev show -json "$plan_file" |
+              jq -r '
+                .resource_changes[]?
+                | select(.change.actions != ["no-op"])
+                | "| `" + (.change.actions | join(" + ")) + "` | `" + .address + "` |"
+              '
+          } >> "$GITHUB_STEP_SUMMARY"
