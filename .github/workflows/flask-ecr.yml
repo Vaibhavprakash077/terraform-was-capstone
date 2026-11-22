@@ -85,7 +85,7 @@ jobs:
               if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               run: aws sts get-caller-identity
             - name: Login to Amazon ECR
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              if: ${{false}}
               id: login-ecr
               uses: aws-actions/amazon-ecr-login@v2
             - name: Tag and push Docker image to ECR
