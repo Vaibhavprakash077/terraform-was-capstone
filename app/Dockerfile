@@ -1,4 +1,8 @@
-FROM python:3.14-slim-bookworm
+FROM python:3.14-slim-trixie
+
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
