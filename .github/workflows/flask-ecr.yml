@@ -62,15 +62,14 @@ jobs:
                 if-no-files-found: error
                 retention-days: 14
 
-            # Initial enforcement: fixable OS HIGH/CRITICAL vulnerabilities.
-            # Python SBOM discrepancy remains under investigation.
+            # Enforce fixable HIGH/CRITICAL findings in OS and application packages.
             - name: Trivy security gate
               uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
               with:
                 image-ref: flask-app:ci
                 scan-type: image
                 scanners: vuln
-                vuln-type: os
+                vuln-type: os,library
                 severity: HIGH,CRITICAL
                 ignore-unfixed: 'true'
                 exit-code: '1'
@@ -85,11 +84,17 @@ jobs:
               if: github.event_name == 'push' && github.ref == 'refs/heads/main'
               run: aws sts get-caller-identity
             - name: Login to Amazon ECR
-              if: ${{false}}
+              if: >-
+                github.event_name == 'push' &&
+                github.ref == 'refs/heads/main' &&
+                vars.ECR_PUBLISH_ENABLED == 'true'
               id: login-ecr
               uses: aws-actions/amazon-ecr-login@v2
             - name: Tag and push Docker image to ECR
-              if: ${{false}}
+              if: >-
+                github.event_name == 'push' &&
+                github.ref == 'refs/heads/main' &&
+                vars.ECR_PUBLISH_ENABLED == 'true'
               env:
                 REGISTRY: ${{ steps.login-ecr.outputs.registry }}
                 REPOSITORY: dev-flask-app
