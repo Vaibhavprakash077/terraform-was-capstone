@@ -76,7 +76,10 @@ jobs:
                 exit-code: '1'
 
             - name: Configure AWS Credentials
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              if: >-
+                github.event_name == 'workflow_dispatch' &&
+                github.ref == 'refs/heads/main' &&
+                vars.ECR_PUBLISH_ENABLED == 'true'
               uses: aws-actions/configure-aws-credentials@v6
               with:
                 role-to-assume: arn:aws:iam::207224908189:role/GithubActions-ECR-Push-Role
