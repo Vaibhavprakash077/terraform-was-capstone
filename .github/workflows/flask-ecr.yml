@@ -82,22 +82,23 @@ jobs:
                 role-to-assume: arn:aws:iam::207224908189:role/GithubActions-ECR-Push-Role
                 aws-region: ap-south-1
             - name: Verfify AWS identity
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-                  (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+              if: >-
+                github.event_name == 'workflow_dispatch' &&
+                github.ref == 'refs/heads/main' &&
+                vars.ECR_PUBLISH_ENABLED == 'true'
               run: aws sts get-caller-identity
             - name: Login to Amazon ECR
               if: >-
-                github.event_name == 'push' &&
-                github.ref == 'refs/heads/main' &&
-                (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-                vars.ECR_PUBLISH_ENABLED == 'true'
+                  github.event_name == 'workflow_dispatch' &&
+                  github.ref == 'refs/heads/main' &&
+                  vars.ECR_PUBLISH_ENABLED == 'true'
               id: login-ecr
               uses: aws-actions/amazon-ecr-login@v2
             - name: Tag and push Docker image to ECR
               if: >-
-                github.event_name == 'push' &&
-                github.ref == 'refs/heads/main' &&
-                vars.ECR_PUBLISH_ENABLED == 'true'
+                  github.event_name == 'workflow_dispatch' &&
+                  github.ref == 'refs/heads/main' &&
+                  vars.ECR_PUBLISH_ENABLED == 'true'
               env:
                 REGISTRY: ${{ steps.login-ecr.outputs.registry }}
                 REPOSITORY: dev-flask-app
