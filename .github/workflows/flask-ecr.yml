@@ -7,6 +7,7 @@ on:
     pull_request:
         branches:
             - main
+    workflow_dispatch:
 
 permissions:
     contents: read
@@ -81,12 +82,14 @@ jobs:
                 role-to-assume: arn:aws:iam::207224908189:role/GithubActions-ECR-Push-Role
                 aws-region: ap-south-1
             - name: Verfify AWS identity
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              if: github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+                  (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
               run: aws sts get-caller-identity
             - name: Login to Amazon ECR
               if: >-
                 github.event_name == 'push' &&
                 github.ref == 'refs/heads/main' &&
+                (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
                 vars.ECR_PUBLISH_ENABLED == 'true'
               id: login-ecr
               uses: aws-actions/amazon-ecr-login@v2
