@@ -1,32 +1,20 @@
 # Deploying the dev workload
 
-The manual **Terraform Apply** workflow produces and applies a saved plan for the default workspace in `ap-south-1`. Each operation requires a separate dispatch from the same `main` commit and admission to the `terraform-apply` environment. The existing **Terraform Plan** workflow remains available for advisory plans.
+**Terraform Plan** provides an advisory preview. **Terraform Apply** deploys the dev workload in the default workspace in `ap-south-1` through a single manual dispatch on `main`.
 
 ## Before enabling deployment
 
-- A bootstrap operator owns the GitHub OIDC provider, all three CI identities and their policies/attachments. Review a fresh, untargeted plan under trusted operator credentials. The expected IAM rollout updates the existing Plan and Apply policies in place, creates the companion network policy, and attaches it to the existing Apply role. Preserve the managed policy ARN, the trust conditions and the ECR repository. If that plan includes workload creates, do not execute it as a bootstrap-only change. Prepare a separately approved, IAM-only bootstrap operation and reconcile with another untargeted plan. The workflow rejects pending root IAM changes before provisioning.
+- A bootstrap operator owns the GitHub OIDC provider, CI identities, policies and attachments. Confirm these resources and the retained ECR repository have zero planned changes. Route any discrepancy to the bootstrap owner for separate review. This workflow change requires no IAM rollout.
 - The live Apply trust checked on 24 November 2026 required the GitHub provider, STS audience, the exact repository-ID/owner-ID subject for `terraform-apply`, `refs/heads/main`, and workflow name `Terraform Apply`. GitHub allowed only branch `main` in this environment. It had one required reviewer, allowed self-review and admin bypass, and `main` was unprotected. Protect deployment code with required review and arrange an independent environment reviewer before enabling workload writes. The workflow display name alone does not identify immutable code.
-- Configure a randomly generated, high-entropy, single-line `TF_PLAN_PASSPHRASE` as a secret on **terraform-apply**, and provide it to authorized plan reviewers through a secret manager. The repository is public. Only encrypted plans may leave the runner. Rotate the secret after exposure and discard pending artifacts. Rotation cannot protect artifacts already downloaded with a compromised key.
 - Verify the existing ECS, Elastic Load Balancing and ECS Application Auto Scaling service-linked roles. Their first-time creation is an operator prerequisite. Review the selected release's current scan and intended run window. NAT gateway hours/processing, ALB hours/LCUs, Fargate, public IPv4 addresses, CloudWatch and data transfer can incur charges.
 
 ## Review and apply
 
-1. Dispatch **Terraform Apply** on `main` with operation `plan` and leave both identifiers empty. The environment gate runs first. The planning session has read access plus the native S3 lock permissions. Terraform 1.16.4 initializes using the tracked provider lockfile, validates, then generates one normal locked plan. The summary lists changed addresses, actions, commit, run ID and plaintext SHA-256. A successful run retains an encrypted plan for one day.
-2. Inspect the **actual plan** on a trusted machine using the same commit, Terraform CLI and locked providers. Run these commands from the repository root. Supply the passphrase at the GPG prompt. Keep the temporary directory private and remove it after review. The human-readable plan can contain sensitive values.
-
-   ```bash
-   umask 077
-   review_dir=$(mktemp -d)
-   gh run download "$PLAN_RUN_ID" -n "dev-plan-$PLAN_RUN_ID" -D "$review_dir"
-   gpg --output "$review_dir/dev.tfplan" --decrypt "$review_dir/dev.tfplan.gpg"
-   shasum -a 256 "$review_dir/dev.tfplan"
-   TF_DATA_DIR="$review_dir/tfdata" terraform -chdir=environments/dev init -backend=false -lockfile=readonly
-   TF_DATA_DIR="$review_dir/tfdata" terraform -chdir=environments/dev show -no-color "$review_dir/dev.tfplan"
-   ```
-
-3. Compare the hash with the run summary. Review IAM trust, policy attachments, SG sources, routes, replacements/deletes, ECS digest, alarms and cost. Confirm that the retained ECR repository and CI IAM resources have zero changes. The image lookup checks the immutable tag against the pinned index digest in `environments/dev/main.tf`; ECS receives a digest reference. The selected index contained a Linux amd64 manifest when checked on 24 November 2026.
-4. Dispatch **Terraform Apply** again with operation `apply`, the successful planning run ID and the hash you reviewed. The reviewer should check those inputs in the dispatch event against the first run before approving the environment. The workflow checks run provenance, age, current main SHA, plan bytes and the workload boundary. Terraform takes the S3 lock and applies only the saved binary. A newer state serial, different lineage, expired artifact or changed commit requires a new plan. Runs are serialized and in-progress applies are never canceled by concurrency settings.
-5. After an error, inspect state, CloudTrail and the affected service before generating a fresh plan. Terraform can persist partial changes. Out-of-band changes that leave the state serial untouched may escape saved-plan staleness detection. Following success, verify ECS service stability, running image digest, target health, HTTP 200 from `/health`, logs and an untargeted reconciliation plan. Budget approval and a teardown owner are required for the deployment window.
+1. Run **Terraform Plan** on the intended `main` commit. Review its commit SHA, resource addresses and actions alongside the code diff. Inspect security-sensitive attributes such as execution-role trust, policy attachments, ingress sources and routes in a trusted terminal if needed. Review deletes and replacements, the pinned image digest, expected charges, deployment window and teardown owner before approving.
+2. Dispatch **Terraform Apply** on `main`. The `terraform-apply` environment reviewer checks the dispatch SHA against the reviewed commit. **Environment approval occurs before the final deployment plan is generated.** Approval authorizes the job to plan and then apply automatically. Changes in state or AWS since the advisory preview can affect the final plan.
+3. On one hosted runner, Terraform 1.16.4 initializes with the tracked provider lockfile, validates, and saves a fresh untargeted plan under a restricted OIDC session of the Apply role. The ECR lookup in `environments/dev/main.tf` checks the immutable release tag against the pinned digest used by ECS. The script screens the saved plan for completeness and the workload boundary before the job obtains the role's deployment session.
+4. The job checks that the dispatch commit is still the head of `main` and applies the same local plan. Plan and apply each acquire the native S3 lock with a five-minute wait. Apply runs are serialized and concurrency allows an active run to finish. The binary stays in runner temporary storage and is removed in the cleanup step. Logs omit raw plan values and apply output.
+5. If the branch advances or Terraform rejects a stale plan, review the current commit and dispatch a fresh run. After an apply error, inspect state, CloudTrail and the affected services first because partial changes can persist. Following success, verify ECS service stability, the running image digest, target health, HTTP 200 from `/health`, CloudWatch logs and a fresh untargeted reconciliation plan.
 
 ## Permission inventory
 
