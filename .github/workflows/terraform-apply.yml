@@ -1,24 +1,7 @@
 name: Terraform Apply
-run-name: Terraform ${{ inputs.operation }} dev ${{ inputs.plan_run_id }}
 
 on:
   workflow_dispatch:
-    inputs:
-      operation:
-        description: Prepare a plan or apply a previously reviewed plan
-        type: choice
-        options: [plan, apply]
-        default: plan
-        required: true
-      plan_run_id:
-        description: For apply, the successful plan run ID
-        type: string
-      plan_sha256:
-        description: For apply, the reviewed plaintext plan SHA-256
-        type: string
-
-permissions:
-  contents: read
 
 concurrency:
   group: terraform-dev-apply
@@ -32,13 +15,10 @@ jobs:
     environment: terraform-apply
     permissions:
       contents: read
-      actions: read
       id-token: write
     env:
       TF_IN_AUTOMATION: 'true'
       TF_WORKSPACE: default
-      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
-      PLAN_SHA256: ${{ inputs.plan_sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,14 +29,7 @@ jobs:
           terraform_version: '1.16.4'
           terraform_wrapper: false
 
-      - name: Check dispatch and plan provenance
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OPERATION: ${{ inputs.operation }}
-        run: bash .github/scripts/terraform-apply.sh verify-dispatch
-
       - name: Configure restricted planning session
-        if: inputs.operation == 'plan'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ap-south-1
@@ -74,23 +47,15 @@ jobs:
             {"Effect":"Allow","Action":["s3:PutObject","s3:DeleteObject"],
             "Resource":"arn:aws:s3:::tfstate-vaibhav-capstone-207224908189-aps1/terraform-aws-capstone/dev/terraform.tfstate.tflock"}]}
 
-      - name: Download the selected encrypted plan
-        if: inputs.operation == 'apply'
-        uses: actions/download-artifact@v4
-        with:
-          name: dev-plan-${{ inputs.plan_run_id }}
-          run-id: ${{ inputs.plan_run_id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}
+      - name: Initialize and validate dev
+        run: |
+          terraform -chdir=environments/dev init -input=false -lockfile=readonly
+          terraform -chdir=environments/dev validate
 
-      - name: Decrypt and verify reviewed bytes
-        if: inputs.operation == 'apply'
-        env:
-          TF_PLAN_PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
-        run: bash .github/scripts/terraform-apply.sh decrypt
+      - name: Save plan and validate workload boundary
+        run: bash .github/scripts/terraform-apply.sh plan
 
       - name: Configure deployment session
-        if: inputs.operation == 'apply'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ap-south-1
@@ -98,32 +63,11 @@ jobs:
           role-to-assume: arn:aws:iam::207224908189:role/GithubActions-Terraform-Apply-Role
           role-session-name: DevApply-${{ github.run_id }}
 
-      - name: Initialize and validate dev
-        run: |
-          terraform -chdir=environments/dev init -input=false -lockfile=readonly
-          terraform -chdir=environments/dev validate
-
-      - name: Save, screen and encrypt the plan
-        if: inputs.operation == 'plan'
-        env:
-          TF_PLAN_PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
-        run: bash .github/scripts/terraform-apply.sh plan
-
-      - name: Retain encrypted plan for one day
-        if: inputs.operation == 'plan'
-        uses: actions/upload-artifact@v4
-        with:
-          name: dev-plan-${{ github.run_id }}
-          path: ${{ runner.temp }}/dev.tfplan.gpg
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Apply exactly the reviewed plan
-        if: inputs.operation == 'apply'
+      - name: Apply the local saved plan
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/terraform-apply.sh apply
 
-      - name: Remove local plan material
+      - name: Remove local plan
         if: always()
-        run: rm -f "$RUNNER_TEMP"/dev.tfplan{,.gpg,.log}
+        run: rm -f "$RUNNER_TEMP/dev.tfplan"
