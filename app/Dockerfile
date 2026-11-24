@@ -1,4 +1,8 @@
-FROM python:3.14-slim-bookworm
+FROM python:3.14-slim-trixie
+
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -6,7 +10,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /srv/app
 
 COPY requirements.txt ./
-RUN python -m pip install --no-cache-dir -r requirements.txt
+# Gunicorn needs no package installer. Remove pip and its bundled bootstrap copy.
+RUN python -m pip install --no-cache-dir -r requirements.txt \
+    && python -m pip check \
+    && python -m pip uninstall --yes pip \
+    && rm -r /usr/local/lib/python3.14/ensurepip
 COPY __init__.py ./app/__init__.py
 
 RUN groupadd --gid 10001 app \

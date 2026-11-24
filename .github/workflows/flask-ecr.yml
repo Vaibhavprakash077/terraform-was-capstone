@@ -6,8 +6,9 @@ on:
             - main
     pull_request:
         branches:
-            - main      
-            
+            - main
+    workflow_dispatch:
+
 permissions:
     contents: read
 jobs:
@@ -40,28 +41,71 @@ jobs:
               uses: actions/checkout@v4
             - name: building image
               run: docker build --platform linux/amd64 -t flask-app:ci ./app
+
+            # Full scan: preserve every HIGH/CRITICAL finding
+            - name: Trivy full vulnerability report
+              uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+              with:
+                image-ref: flask-app:ci
+                scan-type: image
+                scanners: vuln
+                format: json
+                output: trivy-results.json
+                severity: HIGH,CRITICAL
+                exit-code: '0'
+
+            - name: Upload Trivy report
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                name: trivy-vulnerability-report
+                path: trivy-results.json
+                if-no-files-found: error
+                retention-days: 14
+
+            # Enforce fixable HIGH/CRITICAL findings in OS and application packages.
+            - name: Trivy security gate
+              uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+              with:
+                image-ref: flask-app:ci
+                scan-type: image
+                scanners: vuln
+                vuln-type: os,library
+                severity: HIGH,CRITICAL
+                ignore-unfixed: 'true'
+                exit-code: '1'
+
             - name: Configure AWS Credentials
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              if: >-
+                github.event_name == 'workflow_dispatch' &&
+                github.ref == 'refs/heads/main' &&
+                vars.ECR_PUBLISH_ENABLED == 'true'
               uses: aws-actions/configure-aws-credentials@v6
               with:
                 role-to-assume: arn:aws:iam::207224908189:role/GithubActions-ECR-Push-Role
                 aws-region: ap-south-1
             - name: Verfify AWS identity
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              if: >-
+                github.event_name == 'workflow_dispatch' &&
+                github.ref == 'refs/heads/main' &&
+                vars.ECR_PUBLISH_ENABLED == 'true'
               run: aws sts get-caller-identity
             - name: Login to Amazon ECR
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              if: >-
+                  github.event_name == 'workflow_dispatch' &&
+                  github.ref == 'refs/heads/main' &&
+                  vars.ECR_PUBLISH_ENABLED == 'true'
               id: login-ecr
               uses: aws-actions/amazon-ecr-login@v2
             - name: Tag and push Docker image to ECR
-              if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+              if: >-
+                  github.event_name == 'workflow_dispatch' &&
+                  github.ref == 'refs/heads/main' &&
+                  vars.ECR_PUBLISH_ENABLED == 'true'
               env:
                 REGISTRY: ${{ steps.login-ecr.outputs.registry }}
                 REPOSITORY: dev-flask-app
                 IMAGE_TAG: ${{ github.sha }}
               run: |
-                docker tag flask-app:ci $REGISTRY/$REPOSITORY:$IMAGE_TAG 
-                docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG 
-
-
-                  
+                docker tag flask-app:ci "${REGISTRY}/${REPOSITORY}:${IMAGE_TAG}"
+                docker push "${REGISTRY}/${REPOSITORY}:${IMAGE_TAG}"
