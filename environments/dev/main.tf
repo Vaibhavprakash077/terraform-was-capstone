@@ -1,5 +1,6 @@
 module "networking" {
-  source = "../../modules/networking"
+  source    = "../../modules/networking"
+  providers = { aws = aws.network }
 
   vpc_cidr             = var.vpc_cidr
   public_subnet_cidrs  = var.public_subnet_cidrs
@@ -10,7 +11,8 @@ module "networking" {
 }
 
 module "security" {
-  source = "../../modules/security"
+  source    = "../../modules/security"
+  providers = { aws = aws.network }
 
   vpc_id      = module.networking.vpc_id
   environment = var.environment
@@ -28,6 +30,19 @@ module "ecr" {
 
   repository_name = "${var.environment}-flask-app"
   environment     = var.environment
+}
+
+# The immutable release tag is the operator-facing identifier. ECS pulls its digest.
+data "aws_ecr_image" "release" {
+  repository_name = module.ecr.repository_name
+  image_tag       = "7dc368b0eb5c17f6f9391898734571141271cac9"
+
+  lifecycle {
+    postcondition {
+      condition     = self.image_digest == "sha256:d9161cf30b0f4a3d3b5c9f7bc14ced69cf7d6126b8df4900906847c983d05fe1"
+      error_message = "The ECR tag must resolve to the reviewed release digest."
+    }
+  }
 }
 
 module "alb" {
@@ -53,7 +68,8 @@ module "compute" {
   private_subnet_ids = module.networking.private_subnet_ids
   ecs_sg_id          = [module.security.ecs_sg_id]
   target_group_arn   = module.alb.target_group_arn
-  image_tag          = "v1"
+  image_tag          = data.aws_ecr_image.release.image_tag
+  image_digest       = data.aws_ecr_image.release.image_digest
 
   depends_on = [
     module.alb,

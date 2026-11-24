@@ -16,6 +16,7 @@ data "aws_iam_policy_document" "terraform_plan_permissions" {
       test     = "StringLike"
       variable = "s3:prefix"
       values = [
+        "env:/", # Default S3 workspace discovery (list only).
         "terraform-aws-capstone/dev/terraform.tfstate",
         "terraform-aws-capstone/dev/terraform.tfstate.tflock"
       ]
@@ -40,6 +41,16 @@ data "aws_iam_policy_document" "terraform_plan_permissions" {
     resources = [
       "arn:aws:s3:::tfstate-vaibhav-capstone-207224908189-aps1/terraform-aws-capstone/dev/terraform.tfstate.tflock"
     ]
+  }
+
+  statement {
+    actions   = ["ecr:DescribeImages"]
+    resources = ["arn:aws:ecr:ap-south-1:207224908189:repository/dev-flask-app"]
+  }
+
+  statement {
+    actions   = ["application-autoscaling:ListTagsForResource"]
+    resources = ["arn:aws:application-autoscaling:ap-south-1:207224908189:scalable-target/*"]
   }
 
   statement {

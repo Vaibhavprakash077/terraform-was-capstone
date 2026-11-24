@@ -1,34 +1,129 @@
 name: Terraform Apply
+run-name: Terraform ${{ inputs.operation }} dev ${{ inputs.plan_run_id }}
 
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Prepare a plan or apply a previously reviewed plan
+        type: choice
+        options: [plan, apply]
+        default: plan
+        required: true
+      plan_run_id:
+        description: For apply, the successful plan run ID
+        type: string
+      plan_sha256:
+        description: For apply, the reviewed plaintext plan SHA-256
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: terraform-dev-apply
+  cancel-in-progress: false
+
 jobs:
-  apply-auth-check:
-    name: Verify Terraform Apply Authentication
+  terraform:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
-
+    timeout-minutes: 55
     environment: terraform-apply
-
     permissions:
       contents: read
+      actions: read
       id-token: write
-    
+    env:
+      TF_IN_AUTOMATION: 'true'
+      TF_WORKSPACE: default
+      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+      PLAN_SHA256: ${{ inputs.plan_sha256 }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Configure AWS Credentials
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.16.4'
+          terraform_wrapper: false
+
+      - name: Check dispatch and plan provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+        run: bash .github/scripts/terraform-apply.sh verify-dispatch
+
+      - name: Configure restricted planning session
+        if: inputs.operation == 'plan'
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: arn:aws:iam::207224908189:role/GithubActions-Terraform-Apply-Role
           aws-region: ap-south-1
-          role-session-name: TerraformApplyAuthcheck
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
+          allowed-account-ids: '207224908189'
+          role-to-assume: arn:aws:iam::207224908189:role/GithubActions-Terraform-Apply-Role
+          role-session-name: DevPlan-${{ github.run_id }}
+          # STS intersects this allowlist with the role's resource restrictions.
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[
+            {"Effect":"Allow","Action":["ec2:Describe*","ecs:Describe*","ecs:List*",
+            "elasticloadbalancing:Describe*","application-autoscaling:Describe*",
+            "application-autoscaling:ListTagsForResource","cloudwatch:DescribeAlarms","cloudwatch:ListTagsForResource",
+            "logs:DescribeLogGroups","logs:ListTagsForResource","ecr:Describe*","ecr:ListTagsForResource",
+            "iam:Get*","iam:List*","s3:ListBucket","s3:GetObject"],"Resource":"*"},
+            {"Effect":"Allow","Action":["s3:PutObject","s3:DeleteObject"],
+            "Resource":"arn:aws:s3:::tfstate-vaibhav-capstone-207224908189-aps1/terraform-aws-capstone/dev/terraform.tfstate.tflock"}]}
 
-      - name: Confirm authentication test
-        run: echo "Terraform Apply OIDC authentication successful"
-        
+      - name: Download the selected encrypted plan
+        if: inputs.operation == 'apply'
+        uses: actions/download-artifact@v4
+        with:
+          name: dev-plan-${{ inputs.plan_run_id }}
+          run-id: ${{ inputs.plan_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}
+
+      - name: Decrypt and verify reviewed bytes
+        if: inputs.operation == 'apply'
+        env:
+          TF_PLAN_PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
+        run: bash .github/scripts/terraform-apply.sh decrypt
+
+      - name: Configure deployment session
+        if: inputs.operation == 'apply'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ap-south-1
+          allowed-account-ids: '207224908189'
+          role-to-assume: arn:aws:iam::207224908189:role/GithubActions-Terraform-Apply-Role
+          role-session-name: DevApply-${{ github.run_id }}
+
+      - name: Initialize and validate dev
+        run: |
+          terraform -chdir=environments/dev init -input=false -lockfile=readonly
+          terraform -chdir=environments/dev validate
+
+      - name: Save, screen and encrypt the plan
+        if: inputs.operation == 'plan'
+        env:
+          TF_PLAN_PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
+        run: bash .github/scripts/terraform-apply.sh plan
+
+      - name: Retain encrypted plan for one day
+        if: inputs.operation == 'plan'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-plan-${{ github.run_id }}
+          path: ${{ runner.temp }}/dev.tfplan.gpg
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Apply exactly the reviewed plan
+        if: inputs.operation == 'apply'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/terraform-apply.sh apply
+
+      - name: Remove local plan material
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/dev.tfplan{,.gpg,.log}
