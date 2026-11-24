@@ -46,3 +46,9 @@ variable "ecs_sg_id" {
 variable "image_tag" {
   type = string
 }
+
+variable "image_digest" {
+  type        = string
+  default     = null
+  description = "Immutable release digest. Existing tag-only callers may omit it."
+}
